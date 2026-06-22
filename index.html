@@ -30,9 +30,11 @@
 
   /* Header */
   .topbar{position:absolute;top:0;left:0;right:0;z-index:1000;display:flex;align-items:center;gap:10px;
-    padding:10px 14px;background:linear-gradient(180deg,rgba(15,17,21,.96),rgba(15,17,21,.78) 70%,rgba(15,17,21,0));pointer-events:none}
-  .brand{pointer-events:auto;display:flex;align-items:center;gap:10px}
-  .brand .mark{width:56px;height:56px;display:block;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}
+    padding:14px 16px;background:transparent;pointer-events:none}
+  .brand{pointer-events:auto;display:flex;align-items:center;gap:10px;
+    background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:8px 16px 8px 10px;
+    box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  .brand .mark{width:48px;height:48px;display:block;object-fit:contain}
   .brand h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px}
   .brand a{color:var(--muted);text-decoration:none;font-size:12px}
   .brand a:hover{color:var(--accent)}
@@ -201,33 +203,42 @@ const map=L.map("map",{zoomControl:false,minZoom:2,
   maxBounds:[[-78,-180],[85,180]],maxBoundsViscosity:1}).setView([25,30],2);
 L.control.zoom({position:"bottomright"}).addTo(map);   // moved off top-left so it doesn't sit behind the logo
 
-/* ---- Base map: land drawn from per-country shapes + transparent labels overlay (Option B) ----
-   Land = self-drawn polygons (countries.geojson, Natural Earth 50m). Deleting a landmass is just
-   "don't draw it" — Antarctica, Greenland and tiny ocean specks are already filtered out of the file.
-   A transparent CARTO labels layer sits on top for dynamic country/state/city names + admin borders. */
+/* ---- Hybrid base map ----
+   Zoomed OUT: clean stylized continents we draw ourselves (countries.geojson, Natural Earth 50m,
+   no borders -> no antimeridian seam; Antarctica/Greenland/tiny islands filtered out of the file).
+   Zoomed IN: the classic CARTO "dark_all" tiles (roads, rivers, parks, borders, labels) fade in,
+   so city-level detail matches the original live map. The fade also hides any Antarctica/Greenland
+   tile labels at world view. */
 const WATER="#e7e8ea";   // soft grey-white sea
 const LAND ="#34373c";   // soft (not aggressive) black land
-const BORDER="#4b4f57";  // subtle country outline
 
-// custom pane so labels/borders render ABOVE the land but BELOW the pins
-map.createPane("labels");
-map.getPane("labels").style.zIndex=450;
-map.getPane("labels").style.pointerEvents="none";
+// pane for the detail tiles: above the land polygons, below the pins
+map.createPane("detail");
+const detailPane=map.getPane("detail");
+detailPane.style.zIndex=450;
+detailPane.style.pointerEvents="none";
+detailPane.style.transition="opacity .35s ease";
 
 let landLayer=null;
 fetch("countries.geojson").then(r=>r.json()).then(geo=>{
   landLayer=L.geoJSON(geo,{
     pane:"overlayPane",
     interactive:false,
-    style:{fillColor:LAND,fillOpacity:1,color:BORDER,weight:.5,opacity:1,lineJoin:"round"}
+    style:{fillColor:LAND,fillOpacity:1,stroke:false}   // no outline -> clean continents, no seam lines
   }).addTo(map);
 }).catch(e=>console.error("country shapes failed to load",e));
 
-// light-text labels + borders that re-detail on zoom; read cleanly on the dark land
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png",{
-  pane:"labels",subdomains:"abcd",maxZoom:19,noWrap:true,
-  attribution:'Land: Natural Earth &middot; Labels &copy; OpenStreetMap, &copy; CARTO'
-}).addTo(map);
+const detailTiles=L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{
+  pane:"detail",subdomains:"abcd",maxZoom:19,
+  attribution:'&copy; OpenStreetMap, &copy; CARTO &middot; Land: Natural Earth'}).addTo(map);
+
+// crossfade the detail tiles in over zoom Z0->Z1
+const Z0=4, Z1=6;
+function syncBase(){
+  const z=map.getZoom();
+  detailPane.style.opacity = Math.max(0,Math.min(1,(z-Z0)/(Z1-Z0)));
+}
+map.on("zoom zoomend",syncBase); syncBase();
 
 const cluster=L.markerClusterGroup({maxClusterRadius:45,spiderfyOnMaxZoom:true,showCoverageOnHover:false,
   iconCreateFunction:c=>{const n=c.getChildCount();const s=n<10?34:n<50?40:46;
