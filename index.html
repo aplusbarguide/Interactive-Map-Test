@@ -30,11 +30,10 @@
 
   /* Header */
   .topbar{position:absolute;top:0;left:0;right:0;z-index:1000;display:flex;align-items:center;gap:10px;
-    padding:14px 16px;background:transparent;pointer-events:none}
-  .brand{pointer-events:auto;display:flex;align-items:center;gap:10px;
-    background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:8px 16px 8px 10px;
-    box-shadow:0 6px 22px rgba(0,0,0,.35)}
-  .brand .mark{width:48px;height:48px;display:block;object-fit:contain}
+    height:66px;padding:0 16px;background:var(--bg);border-bottom:1px solid var(--line);
+    box-shadow:0 2px 16px rgba(0,0,0,.5);pointer-events:auto}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .mark{width:46px;height:46px;display:block;object-fit:contain}
   .brand h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px}
   .brand a{color:var(--muted);text-decoration:none;font-size:12px}
   .brand a:hover{color:var(--accent)}
@@ -48,7 +47,7 @@
     border:none;font-weight:700;padding:8px 12px;border-radius:20px;cursor:pointer;font-size:13px}
 
   /* Panel */
-  .panel{position:absolute;z-index:1000;top:60px;left:14px;width:300px;max-height:calc(100% - 80px);overflow:auto;
+  .panel{position:absolute;z-index:1000;top:82px;left:14px;width:300px;max-height:calc(100% - 102px);overflow:auto;
     background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 12px 40px rgba(0,0,0,.45)}
   .panel h2{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin:0 0 8px}
   .sec{margin-bottom:16px}
@@ -203,21 +202,22 @@ const map=L.map("map",{zoomControl:false,minZoom:2,
   maxBounds:[[-78,-180],[85,180]],maxBoundsViscosity:1}).setView([25,30],2);
 L.control.zoom({position:"bottomright"}).addTo(map);   // moved off top-left so it doesn't sit behind the logo
 
-/* ---- Hybrid base map ----
-   Zoomed OUT: clean stylized continents we draw ourselves (countries.geojson, Natural Earth 50m,
-   no borders -> no antimeridian seam; Antarctica/Greenland/tiny islands filtered out of the file).
-   Zoomed IN: the classic CARTO "dark_all" tiles (roads, rivers, parks, borders, labels) fade in,
-   so city-level detail matches the original live map. The fade also hides any Antarctica/Greenland
-   tile labels at world view. */
-const WATER="#e7e8ea";   // soft grey-white sea
+/* ---- Base map: fixed colors at every zoom ----
+   Land = self-drawn continents (countries.geojson, Natural Earth 50m, no outline -> no antimeridian
+   seam; Antarctica/Greenland/tiny islands filtered, dateline-crossing countries like Russia cut & kept).
+   Water = flat colour, ALWAYS the same (never darkens on zoom).
+   On top sits a TRANSPARENT labels+borders overlay (CARTO only-labels, light text) that fades in as you
+   zoom, giving place names + admin borders at city level WITHOUT changing the land/water colours.
+   (It also stays hidden at world view, so no stray Greenland/Antarctica labels float over the sea.) */
+const WATER="#e7e8ea";   // soft grey-white sea — kept identical at all zooms
 const LAND ="#34373c";   // soft (not aggressive) black land
 
-// pane for the detail tiles: above the land polygons, below the pins
-map.createPane("detail");
-const detailPane=map.getPane("detail");
-detailPane.style.zIndex=450;
-detailPane.style.pointerEvents="none";
-detailPane.style.transition="opacity .35s ease";
+// pane for the labels overlay: above the land polygons, below the pins
+map.createPane("labels");
+const labelsPane=map.getPane("labels");
+labelsPane.style.zIndex=450;
+labelsPane.style.pointerEvents="none";
+labelsPane.style.transition="opacity .35s ease";
 
 let landLayer=null;
 fetch("countries.geojson").then(r=>r.json()).then(geo=>{
@@ -228,17 +228,18 @@ fetch("countries.geojson").then(r=>r.json()).then(geo=>{
   }).addTo(map);
 }).catch(e=>console.error("country shapes failed to load",e));
 
-const detailTiles=L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{
-  pane:"detail",subdomains:"abcd",maxZoom:19,
-  attribution:'&copy; OpenStreetMap, &copy; CARTO &middot; Land: Natural Earth'}).addTo(map);
+// transparent place-name + admin-border overlay (no land/water fill -> colours stay fixed)
+const labelTiles=L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png",{
+  pane:"labels",subdomains:"abcd",maxZoom:19,
+  attribution:'Labels &copy; OpenStreetMap, &copy; CARTO &middot; Land: Natural Earth'}).addTo(map);
 
-// crossfade the detail tiles in over zoom Z0->Z1
+// fade the labels in over zoom Z0->Z1 (only the text/borders fade; colours never change)
 const Z0=4, Z1=6;
-function syncBase(){
+function syncLabels(){
   const z=map.getZoom();
-  detailPane.style.opacity = Math.max(0,Math.min(1,(z-Z0)/(Z1-Z0)));
+  labelsPane.style.opacity = Math.max(0,Math.min(1,(z-Z0)/(Z1-Z0)));
 }
-map.on("zoom zoomend",syncBase); syncBase();
+map.on("zoom zoomend",syncLabels); syncLabels();
 
 const cluster=L.markerClusterGroup({maxClusterRadius:45,spiderfyOnMaxZoom:true,showCoverageOnHover:false,
   iconCreateFunction:c=>{const n=c.getChildCount();const s=n<10?34:n<50?40:46;
